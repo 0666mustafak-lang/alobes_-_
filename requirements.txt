@@ -1,1 +1,5 @@
+python-telegram-bot==20.7
+instagrapi==1.19.6
 telethon==1.34.0
+python-dotenv==1.0.1
+nest_asyncio==1.5.8
