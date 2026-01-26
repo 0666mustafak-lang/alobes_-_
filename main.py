@@ -5,11 +5,9 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 from instagrapi import Client
-from telethon.sync import TelegramClient
+from telethon import TelegramClient
 from telethon.sessions import StringSession
-import nest_asyncio
 
-nest_asyncio.apply()
 
 GULF_HASHTAGS = [
     "حلوين","ورعان","داعمين المواهب","الامارات","الكويت","الرياض",
@@ -236,7 +234,7 @@ def main():
                 MessageHandler(filters.Regex(r"^\d+$"), set_delay),
             ],
             WAIT_LINK: [
-                MessageHandler(filters.Regex(r"^https?://instagram.com"), handle_link)
+                MessageHandler(filters.Regex(r"^https?://(www\.)?instagram\.com/.+"), handle_link)
             ],
             WAIT_COMMENT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment)
