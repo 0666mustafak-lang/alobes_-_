@@ -1,146 +1,50 @@
 import os
-from telebot import TeleBot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from instagrapi import Client
-from telethon.sync import TelegramClient
-from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError
+import asyncio  # <--- أضف هذا السطر
+from pyrogram import Client, filters
+from pyrogram.enums import ChatMemberStatus
+from pyrogram.types import Message
 
-# --- متغيرات البيئة ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-API_ID = int(os.environ.get("TG_API_ID", "0"))      # API_ID لتلقرام
-API_HASH = os.environ.get("TG_API_HASH", "")        # API_HASH لتلقرام
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-bot = TeleBot(TELEGRAM_TOKEN)
+app = Client("deleter_bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
-user_states = {}
-user_data = {}
+TRIGGER_WORD = "مسح"
+finished_chats = set()
 
-# --- /start ---
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("سيشن إنستجرام"), KeyboardButton("سيشن تلغرام"))
-    bot.send_message(message.chat.id, "👋 أهلاً، اختر نوع السيشن الذي تريد استخراجه:", reply_markup=markup)
-    user_states[message.chat.id] = "choose_mode"
-
-# --- خيار المستخدم ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'choose_mode')
-def choose_mode(message):
-    if "إنستجرام" in message.text:
-        user_states[message.chat.id] = 'ig_username'
-        bot.send_message(message.chat.id, "🟦 أرسل البريد الإلكتروني أو اسم المستخدم لحسابك:")
-    elif "تلغرام" in message.text:
-        user_states[message.chat.id] = 'tg_phone'
-        bot.send_message(message.chat.id, "📱 أرسل رقمك بهيئة دولية (مثال: +9647xxxxxxx):")
-    else:
-        bot.send_message(message.chat.id, "يرجى اختيار خيار صحيح.")
-
-# --- إنستجرام: اسم المستخدم ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'ig_username')
-def handle_ig_username(message):
-    user_data[message.chat.id] = {'username': message.text.strip()}
-    user_states[message.chat.id] = 'ig_password'
-    bot.send_message(message.chat.id, "🔑 أرسل كلمة المرور:")
-
-# --- إنستجرام: كلمة السر ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'ig_password')
-def handle_ig_password(message):
-    password = message.text.strip()
-    username = user_data[message.chat.id]['username']
-    bot.send_message(message.chat.id, "⏳ جاري تسجيل الدخول ...")
-    try:
-        cl = Client()
-        cl.login(username, password)
-        sessionid = cl.sessionid
-        bot.send_message(message.chat.id, f"✅ السيشن (sessionid):\n\n`{sessionid}`", parse_mode="Markdown")
-        bot.send_message(
-            message.chat.id,
-            f"📋 استخدمه بمتغير البيئة بهذا الشكل:\nIG_SESSION_{username.upper()}",
-        )
-    except Exception as ex:
-        bot.send_message(message.chat.id, f"❌ حدث خطأ عند تسجيل الدخول!\n\n{str(ex)}")
-    # إعادة لضبط الحالة للاستخراج من جديد
-    user_states[message.chat.id] = "choose_mode"
-    user_data.pop(message.chat.id, None)
-    bot.send_message(message.chat.id, "🔄 لاستخراج سيشن جديد، اختر النوع:")
-
-# --- تلغرام: رقم الهاتف ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'tg_phone')
-def handle_tg_phone(message):
-    phone = message.text.strip()
-    user_data[message.chat.id] = {'tg_phone': phone}
-    user_states[message.chat.id] = 'tg_code'
-    bot.send_message(message.chat.id, "🔐 أرسل رمز التحقق (الكود):")
-    # إنشاء عميل/جلسة جديدة للمستخدم
-    client = TelegramClient(StringSession(), API_ID, API_HASH)
-    client.connect()
-    user_data[message.chat.id]['tg_client'] = client
-    try:
-        client.send_code_request(phone)
-    except Exception as ex:
-        user_states[message.chat.id] = "choose_mode"
-        bot.send_message(message.chat.id, f"❌ خطأ أثناء إرسال الرمز:\n{str(ex)}")
+@app.on_message(filters.command([TRIGGER_WORD], prefixes='') & filters.group)
+async def delete_all_members(client: Client, message: Message):
+    chat_id = message.chat.id
+    if chat_id in finished_chats:
+        await message.reply("تم تنفيذ المهمة بالفعل. أزلني أو انقلني لمجموعة جديدة.")
         return
 
-# --- تلغرام: كود التحقق ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'tg_code')
-def handle_tg_code(message):
-    code = message.text.strip()
-    data = user_data[message.chat.id]
-    client = data['tg_client']
-    phone = data['tg_phone']
-    try:
-        client.sign_in(phone=phone, code=code)
-        session_text = client.session.save()
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📋 انسخ السيشن", callback_data="copy_session"))
-        bot.send_message(
-            message.chat.id,
-            f"✅ سيشن التلغرام:\n\n`{session_text}`",
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
-    except SessionPasswordNeededError:
-        user_states[message.chat.id] = "tg_pass"
-        bot.send_message(message.chat.id, "🔒 الحساب مفعل عليه 2FA\nأرسل كلمة السر:")
-        return
-    except Exception as ex:
-        bot.send_message(message.chat.id, f"❌ خطأ أثناء تسجيل الدخول:\n{str(ex)}")
-    # إعادة لضبط الحالة
-    user_states[message.chat.id] = "choose_mode"
-    user_data.pop(message.chat.id, None)
-    bot.send_message(message.chat.id, "🔄 لاستخراج سيشن جديد، اختر النوع:")
+    # حذف جميع الأعضاء (عدا المشرفين وصاحب البوت)
+    async for member in app.get_chat_members(chat_id):
+        if member.status not in [
+            ChatMemberStatus.OWNER,
+            ChatMemberStatus.ADMINISTRATOR,
+        ]:
+            try:
+                await app.kick_chat_member(chat_id, member.user.id)
+                await asyncio.sleep(2)  # <--- أضف هذا التأخير بعد كل عملية طرد
+            except Exception as e:
+                pass
 
-# --- تلغرام: كلمة المرور للحسابات 2FA ---
-@bot.message_handler(func=lambda m: user_states.get(m.chat.id) == 'tg_pass')
-def handle_tg_pass(message):
-    password = message.text.strip()
-    data = user_data[message.chat.id]
-    client = data['tg_client']
-    try:
-        client.sign_in(password=password)
-        session_text = client.session.save()
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📋 انسخ السيشن", callback_data="copy_session"))
-        bot.send_message(
-            message.chat.id,
-            f"✅ سيشن التلغرام:\n\n`{session_text}`",
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
-    except Exception as ex:
-        bot.send_message(message.chat.id, f"❌ كلمة المرور غير صحيحة\n{str(ex)}")
-    # إعادة لضبط الحالة
-    user_states[message.chat.id] = "choose_mode"
-    user_data.pop(message.chat.id, None)
-    bot.send_message(message.chat.id, "🔄 لاستخراج سيشن جديد، اختر النوع:")
+    # حذف كل رسائل الانضمام
+    async for msg in app.get_chat_history(chat_id, limit=1000):
+        if (
+            msg.new_chat_members
+            or msg.left_chat_member
+            or msg.text == ""
+        ):
+            try:
+                await app.delete_messages(chat_id, msg.id)
+            except Exception:
+                pass
 
-# --- زر "انسخ السيشن" ---
-@bot.callback_query_handler(func=lambda c: c.data == "copy_session")
-def copy_session_handler(call):
-    bot.answer_callback_query(call.id, "تم النسخ! (انسخه يدوياً إذا لم يظهر زر النسخ)", show_alert=True)
-    # لا شيء إضافي لأن تيليجرام نفسه يعرض زر النسخ للصندوق البرمجي
+    await message.reply("تم حذف كل الأعضاء ورسائل الانضمام. يمكنك الآن إزالة البوت أو استخدامه في جروب آخر.")
+    finished_chats.add(chat_id)
 
-print("Bot started ...")
-bot.polling()
+app.run()
