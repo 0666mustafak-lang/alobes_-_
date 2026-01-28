@@ -1,13 +1,14 @@
 import os
-import asyncio
-from pyrogram import Client, filters, enums
-from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PasswordHashInvalid
-from pyrogram.types import Message
+from pyrogram import Client
 
-# إعدادات البوت الأساسية
-API_ID = "YOUR_API_ID"  # ضع الـ ID هنا
-API_HASH = "YOUR_API_HASH"  # ضع الـ Hash هنا
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # ضع توكن البوت هنا
+# قراءة البيانات من متغيرات البيئة في ريلواي
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# التأكد من تحويل API_ID إلى رقم (Integer)
+if API_ID:
+    API_ID = int(API_ID)
 
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -115,3 +116,4 @@ async def handle_logic(client, message: Message):
         await message.reply("👋 تم تسجيل الخروج وإغلاق الجلسة.")
 
 bot.run()
+
