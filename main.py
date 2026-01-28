@@ -1,24 +1,29 @@
 import os
-from pyrogram import Client
+import asyncio
+from pyrogram import Client, filters, enums
+from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PasswordHashInvalid
+from pyrogram.types import Message
 
-# قراءة البيانات من متغيرات البيئة في ريلواي
+# قراءة البيانات من متغيرات البيئة (Variables) في ريلواي
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# التأكد من تحويل API_ID إلى رقم (Integer)
-if API_ID:
-    API_ID = int(API_ID)
+# تحويل API_ID إلى رقم وتأكيد وجود القيم
+if not API_ID or not API_HASH or not BOT_TOKEN:
+    raise ValueError("تأكد من إضافة API_ID و API_HASH و BOT_TOKEN في إعدادات Variables في ريلواي")
+
+API_ID = int(API_ID)
 
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# مخزن مؤقت لبيانات الجلسات (في الرام لأن السيرفر شغال 24 ساعة)
+# مخزن مؤقت لبيانات الجلسات
 user_data = {}
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     user_id = message.from_user.id
-    # إذا كان هناك جلسة سابقة، نحاول تسجيل الخروج
+    # إنهاء الجلسة القديمة إن وجدت
     if user_id in user_data and "user_client" in user_data[user_id]:
         try:
             await user_data[user_id]["user_client"].log_out()
@@ -28,7 +33,7 @@ async def start(client, message):
     user_data[user_id] = {"step": "phone"}
     await message.reply("مرحباً! أرسل الآن رقم الهاتف بصيغة: \n`+9647xxxxxxx`")
 
-@bot.on_message(filters.private & filters.text)
+@bot.on_message(filters.private & filters.text & ~filters.command("start"))
 async def handle_logic(client, message: Message):
     user_id = message.from_user.id
     text = message.text
@@ -72,6 +77,8 @@ async def handle_logic(client, message: Message):
             await message.reply("🔐 الحساب محمي بكلمة سر (2FA)، أرسل كلمة السر:")
         except PhoneCodeInvalid:
             await message.reply("❌ الكود خاطئ، أرسل الكود الصحيح:")
+        except Exception as e:
+            await message.reply(f"❌ خطأ غير متوقع: {e}")
 
     # 3. إرسال كلمة السر (اختياري)
     elif step == "2fa":
@@ -87,33 +94,34 @@ async def handle_logic(client, message: Message):
     elif step == "link":
         chat_link = text.replace("https://t.me/", "")
         temp_client = user_data[user_id]["user_client"]
-        await message.reply("⏳ جاري التحقق من الصلاحيات وبدء التنظيف...")
+        msg = await message.reply("⏳ جاري التحقق من الصلاحيات وبدء التنفيذ...")
 
         try:
             chat = await temp_client.get_chat(chat_link)
             
-            # حذف رسائل الانضمام (قديم + جديد)
-            await temp_client.set_chat_protected_content(chat.id, False) # لضمان القدرة على الحذف
-            
-            # جلب الأعضاء وحذفهم
+            # عداد للأعضاء المحذوفين
+            count = 0
             async for member in temp_client.get_chat_members(chat.id):
                 if member.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
                     try:
                         await temp_client.ban_chat_member(chat.id, member.user.id)
-                        # التأخير الزمني 2 ثانية كما طلبت
+                        count += 1
+                        # تأخير 2 ثانية كما طلبت
                         await asyncio.sleep(2)
                     except Exception:
                         continue
             
-            await message.reply("🏁 تم الانتهاء من التنظيف بنجاح. جاري تسجيل الخروج...")
+            await msg.edit(f"🏁 اكتملت العملية بنجاح.\nتم حذف {count} عضو.\nجاري تسجيل الخروج...")
             
         except Exception as e:
-            await message.reply(f"❌ حدث خطأ أثناء التنفيذ: {e}")
+            await msg.edit(f"❌ حدث خطأ أثناء التنفيذ: {e}")
         
-        # تسجيل الخروج النهائي
-        await temp_client.log_out()
+        # تسجيل الخروج النهائي وفصل الجلسة
+        try:
+            await temp_client.log_out()
+        except:
+            pass
         del user_data[user_id]
-        await message.reply("👋 تم تسجيل الخروج وإغلاق الجلسة.")
+        await message.reply("👋 تم تسجيل الخروج بنجاح. البوت جاهز لحساب جديد.")
 
 bot.run()
-
